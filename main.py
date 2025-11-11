@@ -5,6 +5,7 @@ import os
 import importlib.util
 import folder_paths
 import time
+import asyncio
 from comfy.cli_args import args
 from app.logger import setup_logger
 import itertools
@@ -14,6 +15,7 @@ import sys
 from comfy_execution.progress import get_progress_state
 from comfy_execution.utils import get_executing_context
 from comfy_api import feature_flags
+from api_server.services.webhook_handler import get_webhook_handler
 
 if __name__ == "__main__":
     #NOTE: These do not do anything on core ComfyUI, they are for custom nodes.
@@ -211,6 +213,24 @@ def prompt_worker(q, server_instance):
                             messages=e.status_messages), process_item=remove_sensitive)
             if server_instance.client_id is not None:
                 server_instance.send_sync("executing", {"node": None, "prompt_id": prompt_id}, server_instance.client_id)
+
+            # Send webhook if URL provided in extra_data
+            webhook_url = extra_data.get('webhook_url')
+            if webhook_url:
+                try:
+                    webhook_handler = get_webhook_handler()
+                    asyncio.run_coroutine_threadsafe(
+                        webhook_handler.send_webhook(
+                            webhook_url,
+                            prompt_id,
+                            'success' if e.success else 'error',
+                            e.history_result.get('outputs', {}),
+                            e.history_result.get('meta', {})
+                        ),
+                        server_instance.loop
+                    )
+                except Exception as webhook_error:
+                    logging.error(f"Webhook error: {webhook_error}")
 
             current_time = time.perf_counter()
             execution_time = current_time - execution_start_time
