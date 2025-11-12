@@ -39,6 +39,7 @@ from app.subgraph_manager import SubgraphManager
 from typing import Optional, Union
 from api_server.routes.internal.internal_routes import InternalRoutes
 from protocol import BinaryEventTypes
+from api_server.schemas.prompt_request import PromptRequest
 
 # Import cache control middleware
 from middleware.cache_middleware import cache_control
@@ -699,7 +700,9 @@ class PromptServer():
         @routes.post("/prompt")
         async def post_prompt(request):
             logging.info("got prompt")
-            json_data =  await request.json()
+            raw_json = await request.json()
+            prompt_request = PromptRequest.model_validate(raw_json)
+            json_data = prompt_request.to_snake_dict()
             json_data = self.trigger_on_prompt(json_data)
 
             if "number" in json_data:

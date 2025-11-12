@@ -29,15 +29,16 @@ except ImportError:
 except Exception as e:
     print(f"Warning: Could not load .env file: {e}")
 
-try:
-    import boto3
-    from botocore.exceptions import ClientError, NoCredentialsError
-    from botocore.config import Config
+from custom_nodes.s3_client_helper import (
+    BOTO3_AVAILABLE,
+    ClientError,
+    create_s3_client,
+)
+
+if BOTO3_AVAILABLE:
     from boto3.s3.transfer import TransferConfig
-    BOTO3_AVAILABLE = True
-except ImportError:
-    BOTO3_AVAILABLE = False
-    print("Warning: boto3 not installed. Install it with: pip install boto3")
+else:
+    TransferConfig = None
 
 try:
     from comfy_api.latest import io, ComfyExtension
@@ -62,7 +63,7 @@ if COMFY_API_AVAILABLE:
                 node_id="SaveToS3",
                 display_name="Save to S3",
                 category="image/video",
-                description="Memory-efficient S3 upload for images (PNG) and videos (MP4). Automatically detects input type.",
+                description="Memory-efficient S3 upload for images (PNG) and videos (MP4). Automatically detects input type and uses shared AWS credential resolution.",
                 inputs=[
                     io.Image.Input(
                         "images",
@@ -134,13 +135,7 @@ if COMFY_API_AVAILABLE:
                     multipart_chunksize=MULTIPART_CHUNKSIZE,
                 )
 
-                s3_client = boto3.client(
-                    's3',
-                    region_name=region_name,
-                    aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-                    aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
-                    aws_session_token=os.environ.get('AWS_SESSION_TOKEN', None)
-                )
+                s3_client = create_s3_client(region=region_name)
             except Exception as e:
                 raise RuntimeError(f"Could not initialize S3 client: {e}")
             
@@ -290,13 +285,7 @@ if COMFY_API_AVAILABLE:
                     multipart_chunksize=MULTIPART_CHUNKSIZE,
                 )
 
-                s3_client = boto3.client(
-                    's3',
-                    region_name=region_name,
-                    aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-                    aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
-                    aws_session_token=os.environ.get('AWS_SESSION_TOKEN', None)
-                )
+                s3_client = create_s3_client(region=region_name)
             except Exception as e:
                 raise RuntimeError(f"Could not initialize S3 client: {e}")
             
