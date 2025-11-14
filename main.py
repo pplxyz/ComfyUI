@@ -214,26 +214,34 @@ def prompt_worker(q, server_instance):
             if server_instance.client_id is not None:
                 server_instance.send_sync("executing", {"node": None, "prompt_id": prompt_id}, server_instance.client_id)
 
+            # Calculate execution time
+            current_time = time.perf_counter()
+            execution_time = current_time - execution_start_time
+
             # Send webhook if URL provided in extra_data
             webhook_url = extra_data.get('webhook_url')
             if webhook_url:
                 try:
                     webhook_handler = get_webhook_handler()
+                    # Add execution time to metadata
+                    meta = e.history_result.get('meta', {}).copy()
+                    # Add elapsed time to each node's meta
+                    for node_id in meta:
+                        if isinstance(meta[node_id], dict):
+                            meta[node_id]['elapsed'] = execution_time
+
                     asyncio.run_coroutine_threadsafe(
                         webhook_handler.send_webhook(
                             webhook_url,
                             prompt_id,
                             'success' if e.success else 'error',
                             e.history_result.get('outputs', {}),
-                            e.history_result.get('meta', {})
+                            meta
                         ),
                         server_instance.loop
                     )
                 except Exception as webhook_error:
                     logging.error(f"Webhook error: {webhook_error}")
-
-            current_time = time.perf_counter()
-            execution_time = current_time - execution_start_time
 
             # Log Time in a more readable way after 10 minutes
             if execution_time > 600:

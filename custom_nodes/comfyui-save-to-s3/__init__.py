@@ -1,6 +1,5 @@
 import os
 import json
-import time
 import gc
 import numpy as np
 from io import BytesIO
@@ -139,25 +138,7 @@ if COMFY_API_AVAILABLE:
             except Exception as e:
                 raise RuntimeError(f"Could not initialize S3 client: {e}")
             
-            # Format filename prefix with date/time variables
-            prefix = ''
-            now = time.localtime()
-            filename_prefix = filename_prefix.replace("%year%", str(now.tm_year))
-            filename_prefix = filename_prefix.replace("%month%", str(now.tm_mon).zfill(2))
-            filename_prefix = filename_prefix.replace("%day%", str(now.tm_mday).zfill(2))
-            filename_prefix = filename_prefix.replace("%hour%", str(now.tm_hour).zfill(2))
-            filename_prefix = filename_prefix.replace("%minute%", str(now.tm_min).zfill(2))
-            filename_prefix = filename_prefix.replace("%second%", str(now.tm_sec).zfill(2))
-            
-            # Get dimensions once
-            if len(images) > 0:
-                width = images[0].shape[1]
-                height = images[0].shape[0]
-                filename_prefix = filename_prefix.replace("%width%", str(width))
-                filename_prefix = filename_prefix.replace("%height%", str(height))
-            
             results = []
-            counter = 0
             
             # Get prompt and extra_pnginfo from hidden inputs
             prompt = cls.hidden.prompt if hasattr(cls, 'hidden') else None
@@ -196,9 +177,11 @@ if COMFY_API_AVAILABLE:
                             for x in extra_pnginfo:
                                 metadata.add_text(x, json.dumps(extra_pnginfo[x]))
                     
-                    # Generate filename with counter
-                    filename_with_batch = filename_prefix.replace("%batch_num%", str(batch_number))
-                    s3_key = f"{filename_with_batch}_{counter:05d}.png"
+                    # Generate filename - use filename_prefix directly, add batch number if multiple images
+                    if len(images) > 1:
+                        s3_key = f"{filename_prefix}_{batch_number}.png"
+                    else:
+                        s3_key = f"{filename_prefix}.png"
                     
                     # Save to BytesIO (streaming, memory efficient)
                     img_buffer = BytesIO()
@@ -234,6 +217,7 @@ if COMFY_API_AVAILABLE:
                         "filename": s3_key.split('/')[-1],
                         "subfolder": "",
                         "type": "output",
+                        "s3_key": s3_key,
                         "s3_url": s3_url,
                         "public_url": public_url
                     })
@@ -257,11 +241,18 @@ if COMFY_API_AVAILABLE:
                     if img_array is not None:
                         del img_array
                     gc.collect()
-                
-                counter += 1
 
-            # Return empty output (this is an output node that saves to S3)
-            return io.NodeOutput()
+            # Return UI output with S3 information for webhook payload
+            # Always return as array of images, even if just one
+            images_output = []
+            for result in results:
+                images_output.append({
+                    "s3_key": result["s3_key"],
+                    "download_uri": result["public_url"]
+                })
+            return io.NodeOutput(ui={
+                "images": images_output
+            })
 
         @staticmethod
         def _save_video_to_s3(cls, video: VideoInput, filename_prefix, s3_bucket, video_format, video_codec):
@@ -289,28 +280,24 @@ if COMFY_API_AVAILABLE:
             except Exception as e:
                 raise RuntimeError(f"Could not initialize S3 client: {e}")
             
-            # Get video dimensions
-            width, height = video.get_dimensions()
-            
-            # Format filename prefix
-            prefix = ''
-            now = time.localtime()
-            filename_prefix = filename_prefix.replace("%year%", str(now.tm_year))
-            filename_prefix = filename_prefix.replace("%month%", str(now.tm_mon).zfill(2))
-            filename_prefix = filename_prefix.replace("%day%", str(now.tm_mday).zfill(2))
-            filename_prefix = filename_prefix.replace("%hour%", str(now.tm_hour).zfill(2))
-            filename_prefix = filename_prefix.replace("%minute%", str(now.tm_min).zfill(2))
-            filename_prefix = filename_prefix.replace("%second%", str(now.tm_sec).zfill(2))
-            filename_prefix = filename_prefix.replace("%width%", str(width))
-            filename_prefix = filename_prefix.replace("%height%", str(height))
-            
             # Get container format and extension
             container_format = VideoContainer.get_value(video_format) if video_format != "auto" else VideoContainer.MP4
             extension = VideoContainer.get_extension(container_format)
             
-            # Generate filename
-            counter = 0
-            s3_key = f"{filename_prefix}_{counter:05d}.{extension}"
+            # Check if filename_prefix contains "undefined" and try to reconstruct from extra_pnginfo
+            if "undefined" in filename_prefix and cls.hidden.extra_pnginfo:
+                extra_pnginfo = cls.hidden.extra_pnginfo
+                character_id = extra_pnginfo.get("characterId") or extra_pnginfo.get("character_id")
+                version_id = extra_pnginfo.get("versionId") or extra_pnginfo.get("version_id")
+                video_type = extra_pnginfo.get("videoType") or extra_pnginfo.get("video_type", "idle")
+                prompt_type_suffix = extra_pnginfo.get("promptTypeSuffix") or extra_pnginfo.get("prompt_type_suffix", "")
+                
+                if character_id and version_id:
+                    # Reconstruct the path from extra_pnginfo values
+                    filename_prefix = f"characters/{character_id}/versions/{version_id}/videos/wan-2.2-{video_type}{prompt_type_suffix}"
+            
+            # Use filename_prefix directly as the full S3 key path and append extension
+            s3_key = f"{filename_prefix}.{extension}"
             
             # Get video components
             components = video.get_components()
@@ -407,8 +394,14 @@ if COMFY_API_AVAILABLE:
                 print(f"Successfully uploaded video to S3: {s3_url}")
                 print(f"Public URL (expires in 1h): {public_url}")
 
-                # Return empty output (this is an output node that saves to S3)
-                return io.NodeOutput()
+                # Return UI output with S3 information for webhook payload
+                # Wrap in list because ComfyUI's UI merge expects list values
+                return io.NodeOutput(ui={
+                    "video": [{
+                        "s3_key": s3_key,
+                        "download_uri": public_url
+                    }]
+                })
                 
             except ClientError as e:
                 error_code = e.response.get('Error', {}).get('Code', 'Unknown')
