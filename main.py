@@ -218,25 +218,41 @@ def prompt_worker(q, server_instance):
             current_time = time.perf_counter()
             execution_time = current_time - execution_start_time
 
-            # Send webhook if URL provided in extra_data
             webhook_url = extra_data.get('webhook_url')
             if webhook_url:
                 try:
                     webhook_handler = get_webhook_handler()
-                    # Add execution time to metadata
-                    meta = e.history_result.get('meta', {}).copy()
-                    # Add elapsed time to each node's meta
-                    for node_id in meta:
-                        if isinstance(meta[node_id], dict):
-                            meta[node_id]['elapsed'] = execution_time
+
+                    raw_outputs = e.history_result.get('outputs', {})
+                    videos = []
+                    images = []
+
+                    for node_id, node_output in raw_outputs.items():
+                        for video in node_output.get('video', []):
+                            videos.append({
+                                's3_key': video.get('s3_key'),
+                                'download_uri': video.get('download_uri'),
+                                'node_id': node_id
+                            })
+
+                        for image in node_output.get('images', []):
+                            images.append({
+                                's3_key': image.get('s3_key'),
+                                'download_uri': image.get('download_uri'),
+                                'node_id': node_id
+                            })
+
+                    metadata = {}
+                    if job_task_id := extra_data.get('job_task_id'):
+                        metadata['job_task_id'] = job_task_id
 
                     asyncio.run_coroutine_threadsafe(
                         webhook_handler.send_webhook(
                             webhook_url,
                             prompt_id,
                             'success' if e.success else 'error',
-                            e.history_result.get('outputs', {}),
-                            meta
+                            {'videos': videos, 'images': images},
+                            metadata
                         ),
                         server_instance.loop
                     )

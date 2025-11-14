@@ -283,20 +283,6 @@ if COMFY_API_AVAILABLE:
             # Get container format and extension
             container_format = VideoContainer.get_value(video_format) if video_format != "auto" else VideoContainer.MP4
             extension = VideoContainer.get_extension(container_format)
-            
-            # Check if filename_prefix contains "undefined" and try to reconstruct from extra_pnginfo
-            if "undefined" in filename_prefix and cls.hidden.extra_pnginfo:
-                extra_pnginfo = cls.hidden.extra_pnginfo
-                character_id = extra_pnginfo.get("characterId") or extra_pnginfo.get("character_id")
-                version_id = extra_pnginfo.get("versionId") or extra_pnginfo.get("version_id")
-                video_type = extra_pnginfo.get("videoType") or extra_pnginfo.get("video_type", "idle")
-                prompt_type_suffix = extra_pnginfo.get("promptTypeSuffix") or extra_pnginfo.get("prompt_type_suffix", "")
-                
-                if character_id and version_id:
-                    # Reconstruct the path from extra_pnginfo values
-                    filename_prefix = f"characters/{character_id}/versions/{version_id}/videos/wan-2.2-{video_type}{prompt_type_suffix}"
-            
-            # Use filename_prefix directly as the full S3 key path and append extension
             s3_key = f"{filename_prefix}.{extension}"
             
             # Get video components

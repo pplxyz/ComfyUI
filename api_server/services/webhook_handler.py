@@ -24,25 +24,15 @@ class WebhookHandler:
             self.session = aiohttp.ClientSession()
         return self.session
     
-    async def send_webhook(self, webhook_url: str, prompt_id: str, status: str, outputs: dict, meta: dict = None):
-        """
-        Send webhook notification
-        
-        Args:
-            webhook_url: URL to send webhook to
-            prompt_id: The prompt ID that completed
-            status: 'success' or 'error'
-            outputs: The output data from the prompt
-            meta: Optional metadata
-        """
+    async def send_webhook(self, webhook_url: str, prompt_id: str, status: str, outputs: dict, metadata: dict = None):
         if not webhook_url:
             return
-            
+
         payload = {
             "prompt_id": prompt_id,
             "status": status,
-            "outputs": outputs,
-            "meta": meta or {}
+            **outputs,
+            "metadata": metadata or {}
         }
         
         try:
