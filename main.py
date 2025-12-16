@@ -5,6 +5,7 @@ import os
 import importlib.util
 import folder_paths
 import time
+import asyncio
 from comfy.cli_args import args
 from app.logger import setup_logger
 import itertools
@@ -14,6 +15,7 @@ import sys
 from comfy_execution.progress import get_progress_state
 from comfy_execution.utils import get_executing_context
 from comfy_api import feature_flags
+from api_server.services.webhook_handler import get_webhook_handler
 
 if __name__ == "__main__":
     #NOTE: These do not do anything on core ComfyUI, they are for custom nodes.
@@ -212,8 +214,50 @@ def prompt_worker(q, server_instance):
             if server_instance.client_id is not None:
                 server_instance.send_sync("executing", {"node": None, "prompt_id": prompt_id}, server_instance.client_id)
 
+            # Calculate execution time
             current_time = time.perf_counter()
             execution_time = current_time - execution_start_time
+
+            webhook_url = extra_data.get('webhook_url')
+            if webhook_url:
+                try:
+                    webhook_handler = get_webhook_handler()
+
+                    raw_outputs = e.history_result.get('outputs', {})
+                    videos = []
+                    images = []
+
+                    for node_id, node_output in raw_outputs.items():
+                        for video in node_output.get('video', []):
+                            videos.append({
+                                's3_key': video.get('s3_key'),
+                                'download_uri': video.get('download_uri'),
+                                'node_id': node_id
+                            })
+
+                        for image in node_output.get('images', []):
+                            images.append({
+                                's3_key': image.get('s3_key'),
+                                'download_uri': image.get('download_uri'),
+                                'node_id': node_id
+                            })
+
+                    metadata = {}
+                    if job_task_id := extra_data.get('job_task_id'):
+                        metadata['job_task_id'] = job_task_id
+
+                    asyncio.run_coroutine_threadsafe(
+                        webhook_handler.send_webhook(
+                            webhook_url,
+                            prompt_id,
+                            'success' if e.success else 'error',
+                            {'videos': videos, 'images': images},
+                            metadata
+                        ),
+                        server_instance.loop
+                    )
+                except Exception as webhook_error:
+                    logging.error(f"Webhook error: {webhook_error}")
 
             # Log Time in a more readable way after 10 minutes
             if execution_time > 600:
